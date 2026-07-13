@@ -20,6 +20,8 @@ from codex_auto.process.output import BoundedOutput, BoundedTextBuffer
 from codex_auto.process.posix import PosixProcessController
 from codex_auto.process.windows import WindowsProcessController
 
+WINDOWS_CREATE_NEW_PROCESS_GROUP = int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+
 
 class ProcessController(Protocol):
     fallback_reason: str | None
@@ -113,7 +115,7 @@ class ProcessSupervisor:
             shell=False,
             env=request.environment,
             start_new_session=os.name != "nt",
-            creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0),
+            creationflags=(WINDOWS_CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0),
         )
         controller.attach(process.pid)
         threads = [

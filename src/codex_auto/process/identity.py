@@ -9,6 +9,8 @@ import sys
 from ctypes import wintypes
 from pathlib import Path
 
+from codex_auto.process.windows import load_kernel32
+
 
 def process_start_identity(pid: int | None = None) -> str | None:
     observed_pid = os.getpid() if pid is None else pid
@@ -39,7 +41,7 @@ def process_identity_matches(pid: int, expected: str) -> bool:
 
 
 def _windows_start_identity(pid: int) -> str | None:
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32 = load_kernel32()
     open_process = kernel32.OpenProcess
     open_process.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
     open_process.restype = wintypes.HANDLE

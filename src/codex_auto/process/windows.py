@@ -6,12 +6,25 @@ import ctypes
 import subprocess
 from collections.abc import Callable
 from ctypes import wintypes
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
 JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS = 9
 PROCESS_TERMINATE = 0x0001
 PROCESS_SET_QUOTA = 0x0100
+
+
+def load_kernel32() -> Any:
+    """Load kernel32 without exposing platform-specific ctypes names to type checkers."""
+    win_dll = cast(Callable[..., Any], vars(ctypes)["WinDLL"])
+    return win_dll("kernel32", use_last_error=True)
+
+
+def last_windows_error() -> OSError:
+    """Return the current Win32 error through a platform-isolated ctypes boundary."""
+    get_last_error = cast(Callable[[], int], vars(ctypes)["get_last_error"])
+    win_error = cast(Callable[[int], OSError], vars(ctypes)["WinError"])
+    return win_error(get_last_error())
 
 
 class _IO_COUNTERS(ctypes.Structure):
@@ -60,11 +73,11 @@ class JobObject(Protocol):
 
 class WindowsJobObject:
     def __init__(self) -> None:
-        kernel32: Any = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32 = load_kernel32()
         self._kernel32 = kernel32
         self._handle = kernel32.CreateJobObjectW(None, None)
         if not self._handle:
-            raise ctypes.WinError(ctypes.get_last_error())
+            raise last_windows_error()
         information = _EXTENDED_LIMIT_INFORMATION()
         information.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
         configured = kernel32.SetInformationJobObject(
@@ -74,7 +87,7 @@ class WindowsJobObject:
             ctypes.sizeof(information),
         )
         if not configured:
-            error = ctypes.WinError(ctypes.get_last_error())
+            error = last_windows_error()
             kernel32.CloseHandle(self._handle)
             self._handle = None
             raise error
@@ -82,16 +95,16 @@ class WindowsJobObject:
     def attach(self, pid: int) -> None:
         process = self._kernel32.OpenProcess(PROCESS_TERMINATE | PROCESS_SET_QUOTA, False, pid)
         if not process:
-            raise ctypes.WinError(ctypes.get_last_error())
+            raise last_windows_error()
         try:
             if not self._kernel32.AssignProcessToJobObject(self._handle, process):
-                raise ctypes.WinError(ctypes.get_last_error())
+                raise last_windows_error()
         finally:
             self._kernel32.CloseHandle(process)
 
     def terminate(self) -> None:
         if self._handle and not self._kernel32.TerminateJobObject(self._handle, 1):
-            raise ctypes.WinError(ctypes.get_last_error())
+            raise last_windows_error()
 
     def close(self) -> None:
         if self._handle:
