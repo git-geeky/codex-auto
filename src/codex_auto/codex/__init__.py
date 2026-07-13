@@ -1,0 +1,1 @@
+"""Installed Codex CLI adapter."""

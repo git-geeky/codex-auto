@@ -1,0 +1,1 @@
+"""Immutable staged external validation."""

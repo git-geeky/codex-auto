@@ -1,0 +1,60 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.11", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m pytest -q
+      - run: python -m ruff check src tests
+      - run: python -m mypy src tests
+      - run: python -m build
+
+  no-real-codex:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m pytest -q -m "not real_codex"
+        env:
+          CODEX_AUTO_FORBID_REAL_CODEX: "1"
+
+  wheel-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install build
+      - run: python -m build
+      - run: python -m venv /tmp/codex-auto-wheel
+      - run: /tmp/codex-auto-wheel/bin/python -m pip install dist/*.whl
+      - run: /tmp/codex-auto-wheel/bin/codex-auto --help
+      - run: /tmp/codex-auto-wheel/bin/python -m codex_auto --help
+      - run: mkdir /tmp/codex-auto-repo && git -C /tmp/codex-auto-repo init -b main
+      - run: |
+          /tmp/codex-auto-wheel/bin/codex-auto init
+          /tmp/codex-auto-wheel/bin/codex-auto config check
+          git config user.name codex-auto-ci
+          git config user.email codex-auto@example.invalid
+          git add .
+          git commit -m initialize
+          /tmp/codex-auto-wheel/bin/codex-auto dry-run --task-file TASK.md --json
+        working-directory: /tmp/codex-auto-repo
