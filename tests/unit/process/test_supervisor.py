@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -116,6 +119,47 @@ def test_supervisor_terminates_timeout_and_marks_reason(tmp_path: Path) -> None:
     assert result.timed_out
     assert result.termination_reason == "total_timeout"
     assert result.duration_seconds < 5
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process-group shutdown behavior")
+def test_supervisor_skips_hard_kill_after_graceful_group_exit(tmp_path: Path) -> None:
+    class GracefulExitController:
+        fallback_reason: str | None = None
+
+        def __init__(self) -> None:
+            self.hard_kill_calls = 0
+
+        def attach(self, pid: int) -> None:
+            del pid
+
+        def terminate(self, pid: int) -> None:
+            killpg = cast(Callable[[int, int], None], vars(os)["killpg"])
+            killpg(pid, int(signal.SIGTERM))
+            time.sleep(0.2)
+
+        def kill(self, pid: int) -> None:
+            del pid
+            self.hard_kill_calls += 1
+
+        def close(self) -> None:
+            return
+
+    controller = GracefulExitController()
+    result = ProcessSupervisor(controller_factory=lambda: controller).run(
+        ProcessRequest(
+            command=(sys.executable, "-c", "import time; time.sleep(30)"),
+            cwd=tmp_path,
+            stdin="",
+            environment=dict(os.environ),
+            total_timeout_seconds=0.2,
+            inactivity_timeout_seconds=5,
+            graceful_shutdown_seconds=1,
+            output_limit_bytes=1024,
+        )
+    )
+
+    assert result.timed_out
+    assert controller.hard_kill_calls == 0
 
 
 def test_supervisor_enforces_distinct_startup_timeout(tmp_path: Path) -> None:
