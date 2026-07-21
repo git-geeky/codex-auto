@@ -320,6 +320,14 @@ def _process_exists(pid: int) -> bool:
             text=True,
         )
         return f'"{pid}"' in completed.stdout
+    proc_stat = Path(f"/proc/{pid}/stat")
+    if proc_stat.is_file():
+        try:
+            state = proc_stat.read_text(encoding="utf-8").rsplit(") ", 1)[1].split()[0]
+        except (IndexError, OSError):
+            state = ""
+        if state == "Z":
+            return False
     try:
         os.kill(pid, 0)
     except ProcessLookupError:

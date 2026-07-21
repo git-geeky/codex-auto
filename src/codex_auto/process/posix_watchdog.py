@@ -1,4 +1,4 @@
-"""POSIX command wrapper that owns and cleans up the command process group."""
+"""POSIX command wrapper that owns and cleans up its process group."""
 
 from __future__ import annotations
 
@@ -13,21 +13,28 @@ from typing import Any, cast
 from codex_auto.process.identity import process_identity_matches
 
 
-def _signal_process_group(process_group_id: int, signal_number: int) -> None:
-    try:
-        cast(Any, os).killpg(process_group_id, signal_number)
-    except ProcessLookupError:
-        return
-
-
-def _process_group_exists(process_group_id: int) -> bool:
-    try:
-        cast(Any, os).killpg(process_group_id, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
+def _group_has_other_members(process_group_id: int, watchdog_pid: int) -> bool:
+    completed = subprocess.run(
+        ["ps", "-axo", "pid=,pgid="],
+        check=False,
+        capture_output=True,
+        text=True,
+        shell=False,
+        start_new_session=True,
+    )
+    if completed.returncode != 0:
         return True
-    return True
+    for raw_line in completed.stdout.splitlines():
+        fields = raw_line.split()
+        if len(fields) != 2:
+            continue
+        try:
+            pid, pgid = (int(field) for field in fields)
+        except ValueError:
+            continue
+        if pgid == process_group_id and pid != watchdog_pid:
+            return True
+    return False
 
 
 def main() -> int:
@@ -45,43 +52,27 @@ def main() -> int:
         print("posix watchdog command must be a nonempty string array", file=sys.stderr)
         return 125
 
-    terminate_requested = False
-    hard_kill_requested = False
-
-    def request_termination(signum: int, frame: object) -> None:
-        nonlocal terminate_requested
+    def remain_until_group_exits(signum: int, frame: object) -> None:
         del signum, frame
-        terminate_requested = True
 
-    def request_hard_kill(signum: int, frame: object) -> None:
-        nonlocal hard_kill_requested
-        del signum, frame
-        hard_kill_requested = True
-
-    signal.signal(signal.SIGTERM, request_termination)
-    hard_kill_signal = int(getattr(signal, "SIGUSR1", 10))
-    signal.signal(hard_kill_signal, request_hard_kill)
-
-    child = subprocess.Popen(raw_command, shell=False, start_new_session=True)
-    child_process_group = child.pid
-    parent_lost = False
+    signal.signal(signal.SIGTERM, remain_until_group_exits)
+    child = subprocess.Popen(raw_command, shell=False)
+    process_group_id = cast(Any, os).getpgrp()
+    watchdog_pid = os.getpid()
+    empty_group_observations = 0
 
     while True:
-        if hard_kill_requested or parent_lost:
-            _signal_process_group(child_process_group, int(getattr(signal, "SIGKILL", 9)))
-            hard_kill_requested = False
-        elif terminate_requested:
-            _signal_process_group(child_process_group, int(signal.SIGTERM))
-            terminate_requested = False
-
         return_code = child.poll()
-        group_exists = _process_group_exists(child_process_group)
-        if return_code is not None and not group_exists:
-            return int(return_code)
+        if return_code is not None:
+            if _group_has_other_members(process_group_id, watchdog_pid):
+                empty_group_observations = 0
+            else:
+                empty_group_observations += 1
+                if empty_group_observations >= 2:
+                    return int(return_code)
 
-        if not parent_lost and not process_identity_matches(parent_pid, parent_identity):
-            parent_lost = True
-            continue
+        if not process_identity_matches(parent_pid, parent_identity):
+            cast(Any, os).killpg(process_group_id, int(getattr(signal, "SIGKILL", 9)))
         time.sleep(0.05)
 
 
