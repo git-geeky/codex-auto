@@ -26,7 +26,7 @@ class PosixProcessController:
             killpg = cast(Callable[[int, int], None], vars(os)["killpg"])
             sigkill = int(getattr(signal, "SIGKILL", 9))
             killpg(pid, sigkill)
-        except ProcessLookupError:
+        except (ProcessLookupError, PermissionError):
             return
 
     def close(self) -> None:

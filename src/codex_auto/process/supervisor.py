@@ -198,8 +198,7 @@ class ProcessSupervisor:
             deadline = time.monotonic() + request.graceful_shutdown_seconds
             while process.poll() is None and time.monotonic() < deadline:
                 time.sleep(0.02)
-            if process.poll() is None:
-                controller.kill(process.pid)
+            controller.kill(process.pid)
             try:
                 process.wait(timeout=max(1.0, request.graceful_shutdown_seconds))
             except subprocess.TimeoutExpired:
