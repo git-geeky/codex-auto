@@ -8,13 +8,13 @@ import pytest
 from codex_auto.process.posix import PosixProcessController
 
 
-def test_hard_kill_ignores_permission_error_from_stale_process_group(
+def test_hard_kill_ignores_permission_error_from_stale_watchdog(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def stale_group(pid: int, signal_number: int) -> NoReturn:
+    def stale_watchdog(pid: int, signal_number: int) -> NoReturn:
         del pid, signal_number
         raise PermissionError
 
-    monkeypatch.setitem(vars(os), "killpg", stale_group)
+    monkeypatch.setattr(os, "kill", stale_watchdog)
 
     PosixProcessController().kill(12345)

@@ -1,11 +1,9 @@
-"""POSIX process-group control."""
+"""POSIX watchdog process control."""
 
 from __future__ import annotations
 
 import os
 import signal
-from collections.abc import Callable
-from typing import cast
 
 
 class PosixProcessController:
@@ -16,16 +14,14 @@ class PosixProcessController:
 
     def terminate(self, pid: int) -> None:
         try:
-            killpg = cast(Callable[[int, int], None], vars(os)["killpg"])
-            killpg(pid, int(signal.SIGTERM))
-        except ProcessLookupError:
+            os.kill(pid, int(signal.SIGTERM))
+        except (ProcessLookupError, PermissionError):
             return
 
     def kill(self, pid: int) -> None:
         try:
-            killpg = cast(Callable[[int, int], None], vars(os)["killpg"])
-            sigkill = int(getattr(signal, "SIGKILL", 9))
-            killpg(pid, sigkill)
+            hard_kill_request = int(getattr(signal, "SIGUSR1", 10))
+            os.kill(pid, hard_kill_request)
         except (ProcessLookupError, PermissionError):
             return
 
