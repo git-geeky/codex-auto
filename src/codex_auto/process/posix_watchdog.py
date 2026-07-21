@@ -27,6 +27,10 @@ def main() -> int:
     ):
         print("posix watchdog command must be a nonempty string array", file=sys.stderr)
         return 125
+    def remain_until_child_exits(signum: int, frame: object) -> None:
+        del signum, frame
+
+    signal.signal(signal.SIGTERM, remain_until_child_exits)
     child = subprocess.Popen(raw_command, shell=False)
     while child.poll() is None:
         if not process_identity_matches(parent_pid, parent_identity):

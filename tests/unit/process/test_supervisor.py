@@ -11,6 +11,7 @@ import pytest
 
 from codex_auto.process.loop import CommandCycle, CommandLoopDetector
 from codex_auto.process.output import BoundedTextBuffer
+from codex_auto.process.posix import PosixProcessController
 from codex_auto.process.supervisor import FileCancelSignal, ProcessRequest, ProcessSupervisor
 
 
@@ -116,6 +117,34 @@ def test_supervisor_terminates_timeout_and_marks_reason(tmp_path: Path) -> None:
     assert result.timed_out
     assert result.termination_reason == "total_timeout"
     assert result.duration_seconds < 5
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process-group shutdown behavior")
+def test_supervisor_skips_hard_kill_after_graceful_group_exit(tmp_path: Path) -> None:
+    class CountingController(PosixProcessController):
+        def __init__(self) -> None:
+            self.hard_kill_calls = 0
+
+        def kill(self, pid: int) -> None:
+            self.hard_kill_calls += 1
+            super().kill(pid)
+
+    controller = CountingController()
+    result = ProcessSupervisor(controller_factory=lambda: controller).run(
+        ProcessRequest(
+            command=(sys.executable, "-c", "import time; time.sleep(30)"),
+            cwd=tmp_path,
+            stdin="",
+            environment=dict(os.environ),
+            total_timeout_seconds=0.2,
+            inactivity_timeout_seconds=5,
+            graceful_shutdown_seconds=1,
+            output_limit_bytes=1024,
+        )
+    )
+
+    assert result.timed_out
+    assert controller.hard_kill_calls == 0
 
 
 def test_supervisor_enforces_distinct_startup_timeout(tmp_path: Path) -> None:
